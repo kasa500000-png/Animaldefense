@@ -16,17 +16,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reassemble Unity project archive
+      - name: Extract Unity project archive
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p .ci
-          cat project_parts/part_*.b64 > .ci/project.zip.b64
-          base64 --decode .ci/project.zip.b64 > .ci/project.zip
-          unzip -q .ci/project.zip -d .ci/extracted
-          test -f .ci/extracted/AnimalRandomDefense_MVP/ProjectSettings/ProjectVersion.txt
-          test -f .ci/extracted/AnimalRandomDefense_MVP/Packages/manifest.json
-          test -f .ci/extracted/AnimalRandomDefense_MVP/Assets/AnimalRandomDefense/Scripts/Editor/Build/AndroidDevelopmentBuilder.cs
+          ARCHIVE="AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip"
+          test -f "$ARCHIVE" || { echo "ERROR: Upload $ARCHIVE to the repository root first."; exit 2; }
+          mkdir -p .ci/extracted
+          unzip -q "$ARCHIVE" -d .ci/extracted
+          PROJECT=".ci/extracted/AnimalRandomDefense_MVP"
+          test -f "$PROJECT/ProjectSettings/ProjectVersion.txt"
+          test -f "$PROJECT/Packages/manifest.json"
+          test -f "$PROJECT/Assets/AnimalRandomDefense/Scripts/Editor/Build/AndroidDevelopmentBuilder.cs"
+          echo "Unity project extracted: $PROJECT"
 
       - name: Free disk space for Unity IL2CPP Android build
         uses: jlumbroso/free-disk-space@v1.3.1
@@ -42,7 +44,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ci/extracted/AnimalRandomDefense_MVP/Library
-          key: ard-v26-android-library-${{ hashFiles('project_parts/**') }}
+          key: ard-v26-android-library-${{ hashFiles('AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip') }}
           restore-keys: |
             ard-v26-android-library-
 
