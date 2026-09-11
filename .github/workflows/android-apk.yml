@@ -1,0 +1,79 @@
+name: Build Android Development APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-apk:
+    name: Unity Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reassemble Unity project archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p .ci
+          cat project_parts/part_*.b64 > .ci/project.zip.b64
+          base64 --decode .ci/project.zip.b64 > .ci/project.zip
+          unzip -q .ci/project.zip -d .ci/extracted
+          test -f .ci/extracted/AnimalRandomDefense_MVP/ProjectSettings/ProjectVersion.txt
+          test -f .ci/extracted/AnimalRandomDefense_MVP/Packages/manifest.json
+          test -f .ci/extracted/AnimalRandomDefense_MVP/Assets/AnimalRandomDefense/Scripts/Editor/Build/AndroidDevelopmentBuilder.cs
+
+      - name: Free disk space for Unity IL2CPP Android build
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: .ci/extracted/AnimalRandomDefense_MVP/Library
+          key: ard-v26-android-library-${{ hashFiles('project_parts/**') }}
+          restore-keys: |
+            ard-v26-android-library-
+
+      - name: Build APK with Unity
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          projectPath: .ci/extracted/AnimalRandomDefense_MVP
+          unityVersion: 6000.3.6f1
+          targetPlatform: Android
+          buildMethod: AnimalRandomDefense.EditorBuild.AndroidDevelopmentBuilder.Build
+
+      - name: Locate and verify APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find . -type f -name 'ZodiacRandomDefense-v26-cloud-dev.apk' -print -quit)"
+          test -n "$APK"
+          mkdir -p apk-output
+          cp "$APK" apk-output/ZodiacRandomDefense-v26-cloud-dev.apk
+          sha256sum apk-output/ZodiacRandomDefense-v26-cloud-dev.apk > apk-output/ZodiacRandomDefense-v26-cloud-dev.apk.sha256
+          ls -lh apk-output
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZodiacRandomDefense-v26-cloud-dev-apk
+          path: apk-output/
+          if-no-files-found: error
+          retention-days: 14
