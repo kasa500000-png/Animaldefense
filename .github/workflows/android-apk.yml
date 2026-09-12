@@ -2,9 +2,18 @@ name: Build Android Development APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip'
+      - '.github/workflows/android-apk.yml'
 
 permissions:
   contents: read
+
+concurrency:
+  group: animaldefense-android-apk
+  cancel-in-progress: true
 
 jobs:
   build-android-apk:
@@ -12,22 +21,59 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
+    env:
+      ARCHIVE: AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip
+      EXPECTED_SHA256: a69ae77198798496970a3668eaee3f202d86effa1566135e401c6918fc2a8039
+      PROJECT: .ci/extracted/AnimalRandomDefense_MVP
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Preflight — archive and Unity credentials
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$ARCHIVE" ]; then
+            echo "::error::Missing $ARCHIVE in repository root. Upload the ZIP from the ChatGPT conversation without renaming it."
+            exit 2
+          fi
+
+          ACTUAL_SHA256="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+          if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::Archive SHA-256 mismatch. Expected $EXPECTED_SHA256, got $ACTUAL_SHA256"
+            exit 3
+          fi
+
+          if [ -z "${UNITY_EMAIL:-}" ] || [ -z "${UNITY_PASSWORD:-}" ]; then
+            echo "::error::Missing UNITY_EMAIL or UNITY_PASSWORD repository secret."
+            exit 4
+          fi
+
+          if [ -z "${UNITY_LICENSE:-}" ] && [ -z "${UNITY_SERIAL:-}" ]; then
+            echo "::error::Missing Unity license secret. Personal: UNITY_LICENSE. Pro: UNITY_SERIAL."
+            exit 5
+          fi
+
+          echo "Archive and Unity credential preflight passed."
 
       - name: Extract Unity project archive
         shell: bash
         run: |
           set -euxo pipefail
-          ARCHIVE="AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip"
-          test -f "$ARCHIVE" || { echo "ERROR: Upload $ARCHIVE to the repository root first."; exit 2; }
+          rm -rf .ci/extracted
           mkdir -p .ci/extracted
           unzip -q "$ARCHIVE" -d .ci/extracted
-          PROJECT=".ci/extracted/AnimalRandomDefense_MVP"
           test -f "$PROJECT/ProjectSettings/ProjectVersion.txt"
           test -f "$PROJECT/Packages/manifest.json"
           test -f "$PROJECT/Assets/AnimalRandomDefense/Scripts/Editor/Build/AndroidDevelopmentBuilder.cs"
+          grep -q '6000.3.6f1' "$PROJECT/ProjectSettings/ProjectVersion.txt"
           echo "Unity project extracted: $PROJECT"
 
       - name: Free disk space for Unity IL2CPP Android build
@@ -59,6 +105,7 @@ jobs:
           projectPath: .ci/extracted/AnimalRandomDefense_MVP
           unityVersion: 6000.3.6f1
           targetPlatform: Android
+          androidExportType: androidPackage
           buildMethod: AnimalRandomDefense.EditorBuild.AndroidDevelopmentBuilder.Build
 
       - name: Locate and verify APK
