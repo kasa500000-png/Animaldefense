@@ -1,49 +1,62 @@
-# APK Cloud Build — remaining 2 steps
+# APK Cloud Build — current status
 
-The GitHub Actions workflow is installed and has already triggered successfully. The current failure is intentional: the build payload and Unity license secrets are not present yet.
+The complete Unity v26.2 source payload is now embedded in this repository under:
 
-## Step 1 — upload the build payload
+`.ci/source_chunks/part000.b64` ~ `part003.b64`
 
-Download from the ChatGPT conversation and upload to the repository root **without renaming**:
+The Android workflow reconstructs the source, verifies SHA-256, extracts the Unity project, builds an ARM64 IL2CPP Development APK, and uploads the result as a GitHub Actions artifact.
 
-`AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip`
+## Confirmed
 
-Expected SHA-256:
+- Source payload embedded: DONE
+- Source archive SHA-256: `767ca4faa9cd0005c247fbaeb5a18e73e4b679f123133c2003b4ef79141fc303`
+- Workflow installed: DONE
+- Unity version: `6000.3.6f1`
+- Android target: ARM64 / IL2CPP / Development APK
+- Artifact name: `ZodiacRandomDefense-v26-cloud-dev-apk`
+- APK name: `ZodiacRandomDefense-v26-cloud-dev.apk`
 
-`a69ae77198798496970a3668eaee3f202d86effa1566135e401c6918fc2a8039`
+## Current blocker — GitHub-hosted runner
 
-Uploading this exact file to `main` automatically triggers the APK workflow.
+A minimal workflow containing only `echo` was tested and failed before GitHub assigned a runner (`runner_id=0`, no steps executed). This confirms the current blocker is the GitHub Actions runner/account state, not Unity or the game source.
 
-## Step 2 — add Unity license secrets
+Check:
 
-GitHub → `Settings` → `Secrets and variables` → `Actions` → `New repository secret`
+1. Repository → `Settings` → `Actions` → `General`
+   - Ensure Actions are enabled for the repository.
+   - Allow the actions used by the workflow (`actions/*`, `game-ci/*`, `jlumbroso/*`).
+2. GitHub account → `Settings` → `Billing & licensing` / `Usage`
+   - Check remaining Actions minutes and spending/payment status for private repositories.
+
+GitHub-hosted standard runners consume the private-repository Actions allowance. If the allowance is exhausted and additional usage is blocked, jobs cannot start.
+
+## Unity license secrets
+
+Once runners are available, configure these only in:
+
+`Repository Settings → Secrets and variables → Actions`
 
 ### Unity Personal
 
-Add all three:
-
-- `UNITY_LICENSE` — full contents of your `.ulf` Unity license file
-- `UNITY_EMAIL` — Unity account email
-- `UNITY_PASSWORD` — Unity account password
+- `UNITY_LICENSE` — full contents of the Unity `.ulf` license file
+- `UNITY_EMAIL`
+- `UNITY_PASSWORD`
 
 ### Unity Pro
-
-Add:
 
 - `UNITY_SERIAL`
 - `UNITY_EMAIL`
 - `UNITY_PASSWORD`
 
-Do not commit these values into the repository.
+Never paste these secret values into source files or chat.
 
-## Build result
+## Build
 
-When both steps are complete the workflow builds:
+After runner access and secrets are ready:
 
-`ZodiacRandomDefense-v26-cloud-dev.apk`
+`Actions → Build Android Development APK → Run workflow`
 
-Artifact name:
+Successful output:
 
-`ZodiacRandomDefense-v26-cloud-dev-apk`
-
-The workflow is configured for Unity `6000.3.6f1`, Android APK, ARM64, IL2CPP, Development Build.
+- Artifact: `ZodiacRandomDefense-v26-cloud-dev-apk`
+- APK: `ZodiacRandomDefense-v26-cloud-dev.apk`
