@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip'
+      - '.ci/source_chunks/**'
       - '.github/workflows/android-apk.yml'
 
 permissions:
@@ -22,15 +22,34 @@ jobs:
     timeout-minutes: 120
 
     env:
-      ARCHIVE: AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip
-      EXPECTED_SHA256: a69ae77198798496970a3668eaee3f202d86effa1566135e401c6918fc2a8039
+      SOURCE_ARCHIVE: .ci/payload/AnimalRandomDefense_v26_2_source.tar.xz
+      SOURCE_SHA256: 767ca4faa9cd0005c247fbaeb5a18e73e4b679f123133c2003b4ef79141fc303
       PROJECT: .ci/extracted/AnimalRandomDefense_MVP
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Preflight — archive and Unity credentials
+      - name: Reconstruct and verify Unity source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f .ci/source_chunks/part000.b64
+          test -f .ci/source_chunks/part001.b64
+          test -f .ci/source_chunks/part002.b64
+          test -f .ci/source_chunks/part003.b64
+          rm -rf .ci/payload .ci/extracted
+          mkdir -p .ci/payload .ci/extracted
+          cat .ci/source_chunks/part*.b64 | tr -d '\r\n' | base64 --decode > "$SOURCE_ARCHIVE"
+          echo "$SOURCE_SHA256  $SOURCE_ARCHIVE" | sha256sum -c -
+          tar -xJf "$SOURCE_ARCHIVE" -C .ci/extracted
+          test -f "$PROJECT/ProjectSettings/ProjectVersion.txt"
+          test -f "$PROJECT/Packages/manifest.json"
+          test -f "$PROJECT/Assets/AnimalRandomDefense/Scripts/Editor/Build/AndroidDevelopmentBuilder.cs"
+          grep -q '6000.3.6f1' "$PROJECT/ProjectSettings/ProjectVersion.txt"
+          echo "Unity project reconstructed and verified: $PROJECT"
+
+      - name: Preflight Unity credentials
         shell: bash
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -39,42 +58,16 @@ jobs:
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
         run: |
           set -euo pipefail
-
-          if [ ! -f "$ARCHIVE" ]; then
-            echo "::error::Missing $ARCHIVE in repository root. Upload the ZIP from the ChatGPT conversation without renaming it."
-            exit 2
-          fi
-
-          ACTUAL_SHA256="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
-          if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-            echo "::error::Archive SHA-256 mismatch. Expected $EXPECTED_SHA256, got $ACTUAL_SHA256"
-            exit 3
-          fi
-
           if [ -z "${UNITY_EMAIL:-}" ] || [ -z "${UNITY_PASSWORD:-}" ]; then
             echo "::error::Missing UNITY_EMAIL or UNITY_PASSWORD repository secret."
+            echo "::error::GitHub > Settings > Secrets and variables > Actions"
             exit 4
           fi
-
           if [ -z "${UNITY_LICENSE:-}" ] && [ -z "${UNITY_SERIAL:-}" ]; then
             echo "::error::Missing Unity license secret. Personal: UNITY_LICENSE. Pro: UNITY_SERIAL."
             exit 5
           fi
-
-          echo "Archive and Unity credential preflight passed."
-
-      - name: Extract Unity project archive
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf .ci/extracted
-          mkdir -p .ci/extracted
-          unzip -q "$ARCHIVE" -d .ci/extracted
-          test -f "$PROJECT/ProjectSettings/ProjectVersion.txt"
-          test -f "$PROJECT/Packages/manifest.json"
-          test -f "$PROJECT/Assets/AnimalRandomDefense/Scripts/Editor/Build/AndroidDevelopmentBuilder.cs"
-          grep -q '6000.3.6f1' "$PROJECT/ProjectSettings/ProjectVersion.txt"
-          echo "Unity project extracted: $PROJECT"
+          echo "Unity credential preflight passed."
 
       - name: Free disk space for Unity IL2CPP Android build
         uses: jlumbroso/free-disk-space@v1.3.1
@@ -90,7 +83,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ci/extracted/AnimalRandomDefense_MVP/Library
-          key: ard-v26-android-library-${{ hashFiles('AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip') }}
+          key: ard-v26-android-library-${{ hashFiles('.ci/source_chunks/*.b64') }}
           restore-keys: |
             ard-v26-android-library-
 
