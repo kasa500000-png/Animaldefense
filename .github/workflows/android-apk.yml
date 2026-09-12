@@ -3,7 +3,9 @@ name: Build Android Development APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - fix/apk-source-repack
     paths:
       - '.ci/source_chunks/**'
       - '.github/workflows/android-apk.yml'
@@ -12,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: animaldefense-android-apk
+  group: animaldefense-android-apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -29,18 +31,84 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Reconstruct and verify Unity source
+      - name: Recover, verify and extract Unity source
         shell: bash
         run: |
-          set -euxo pipefail
-          test -f .ci/source_chunks/part000.b64
-          test -f .ci/source_chunks/part001.b64
-          test -f .ci/source_chunks/part002.b64
-          test -f .ci/source_chunks/part003.b64
-          rm -rf .ci/payload .ci/extracted
-          mkdir -p .ci/payload .ci/extracted
-          cat .ci/source_chunks/part*.b64 | tr -d '\r\n' | base64 --decode > "$SOURCE_ARCHIVE"
+          set -euo pipefail
+          rm -rf .ci/payload .ci/extracted .ci/recovery
+          mkdir -p .ci/payload .ci/extracted .ci/recovery
+
+          # The original main-branch payload was uploaded in four Base64 files.
+          # Three chunks lost their final Base64 character during the original upload.
+          # Recover those three characters deterministically against the already-pinned SHA-256.
+          git fetch --no-tags origin main
+          for n in 000 001 002 003; do
+            git show "origin/main:.ci/source_chunks/part${n}.b64" > ".ci/recovery/part${n}.b64"
+          done
+
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          from pathlib import Path
+
+          root = Path('.ci/recovery')
+          out = Path('.ci/payload/AnimalRandomDefense_v26_2_source.tar.xz')
+          expected = '767ca4faa9cd0005c247fbaeb5a18e73e4b679f123133c2003b4ef79141fc303'
+          alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+          p = [(root / f'part{i:03d}.b64').read_text().strip() for i in range(4)]
+          print('source Base64 lengths:', [len(x) for x in p])
+          if [len(x) for x in p] != [20000, 19999, 19999, 28511]:
+              raise SystemExit('Unexpected source chunk lengths; refusing unsafe recovery')
+
+          d0 = base64.b64decode(p[0], validate=True)
+
+          def candidates(text, allow_padding=False):
+              chars = alphabet + ('=' if allow_padding else '')
+              result = []
+              for c in chars:
+                  try:
+                      result.append((c, base64.b64decode(text + c, validate=True)))
+                  except Exception:
+                      pass
+              return result
+
+          c1 = candidates(p[1])
+          c2 = candidates(p[2])
+          c3 = candidates(p[3], allow_padding=True)
+          if not c1 or not c2 or not c3:
+              raise SystemExit('Unable to form valid Base64 recovery candidates')
+
+          h0 = hashlib.sha256()
+          h0.update(d0)
+          found = None
+          for ch1, d1 in c1:
+              h1 = h0.copy(); h1.update(d1)
+              for ch2, d2 in c2:
+                  h2 = h1.copy(); h2.update(d2)
+                  for ch3, d3 in c3:
+                      h3 = h2.copy(); h3.update(d3)
+                      if h3.hexdigest() == expected:
+                          found = (ch1, ch2, ch3, d0 + d1 + d2 + d3)
+                          break
+                  if found:
+                      break
+              if found:
+                  break
+
+          if not found:
+              raise SystemExit('Could not recover source payload to pinned SHA-256')
+
+          ch1, ch2, ch3, blob = found
+          out.write_bytes(blob)
+          print('Recovered source payload:', len(blob), 'bytes')
+          print('Recovered missing Base64 characters:', repr(ch1), repr(ch2), repr(ch3))
+          print('SHA-256:', hashlib.sha256(blob).hexdigest())
+          PY
+
           echo "$SOURCE_SHA256  $SOURCE_ARCHIVE" | sha256sum -c -
           tar -xJf "$SOURCE_ARCHIVE" -C .ci/extracted
           test -f "$PROJECT/ProjectSettings/ProjectVersion.txt"
@@ -60,7 +128,6 @@ jobs:
           set -euo pipefail
           if [ -z "${UNITY_EMAIL:-}" ] || [ -z "${UNITY_PASSWORD:-}" ]; then
             echo "::error::Missing UNITY_EMAIL or UNITY_PASSWORD repository secret."
-            echo "::error::GitHub > Settings > Secrets and variables > Actions"
             exit 4
           fi
           if [ -z "${UNITY_LICENSE:-}" ] && [ -z "${UNITY_SERIAL:-}" ]; then
@@ -83,7 +150,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ci/extracted/AnimalRandomDefense_MVP/Library
-          key: ard-v26-android-library-${{ hashFiles('.ci/source_chunks/*.b64') }}
+          key: ard-v26-android-library-${{ env.SOURCE_SHA256 }}
           restore-keys: |
             ard-v26-android-library-
 
