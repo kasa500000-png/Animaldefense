@@ -1,0 +1,180 @@
+name: Build and Publish Android Development APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/apk-source-repack
+    paths:
+      - '.github/workflows/android-apk-publish.yml'
+      - '.github/workflows/android-apk.yml'
+      - '.ci/source_chunks/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: animaldefense-publish-apk
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    name: Unity Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SOURCE_ARCHIVE: .ci/payload/AnimalRandomDefense_v26_2_source.tar.xz
+      SOURCE_SHA256: 767ca4faa9cd0005c247fbaeb5a18e73e4b679f123133c2003b4ef79141fc303
+      PROJECT: .ci/extracted/AnimalRandomDefense_MVP
+      APK_NAME: ZodiacRandomDefense-v26-cloud-dev.apk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Recover and verify embedded Unity source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ci/payload .ci/extracted .ci/recovery
+          mkdir -p .ci/payload .ci/extracted .ci/recovery
+          git fetch --no-tags origin main
+          for n in 000 001 002 003; do
+            git show "origin/main:.ci/source_chunks/part${n}.b64" > ".ci/recovery/part${n}.b64"
+          done
+          python3 - <<'PY'
+          import base64, hashlib
+          from pathlib import Path
+          root=Path('.ci/recovery')
+          out=Path('.ci/payload/AnimalRandomDefense_v26_2_source.tar.xz')
+          expected='767ca4faa9cd0005c247fbaeb5a18e73e4b679f123133c2003b4ef79141fc303'
+          alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+          p=[(root/f'part{i:03d}.b64').read_text().strip() for i in range(4)]
+          lengths=[len(x) for x in p]
+          print('Base64 chunk lengths:', lengths)
+          if lengths != [20000,19999,19999,28511]:
+              raise SystemExit(f'Unexpected original source chunk lengths: {lengths}')
+          d0=base64.b64decode(p[0],validate=True)
+          def candidates(text,padding=False):
+              chars=alphabet+('=' if padding else '')
+              out=[]
+              for c in chars:
+                  try: out.append((c,base64.b64decode(text+c,validate=True)))
+                  except Exception: pass
+              return out
+          c1,c2,c3=candidates(p[1]),candidates(p[2]),candidates(p[3],True)
+          h0=hashlib.sha256(); h0.update(d0)
+          found=None
+          for a,d1 in c1:
+              h1=h0.copy(); h1.update(d1)
+              for b,d2 in c2:
+                  h2=h1.copy(); h2.update(d2)
+                  for c,d3 in c3:
+                      h3=h2.copy(); h3.update(d3)
+                      if h3.hexdigest()==expected:
+                          found=(a,b,c,d0+d1+d2+d3); break
+                  if found: break
+              if found: break
+          if not found:
+              raise SystemExit('Unable to recover source payload to pinned SHA-256')
+          a,b,c,blob=found
+          out.write_bytes(blob)
+          print('Recovered missing Base64 chars:',repr(a),repr(b),repr(c))
+          print('Recovered source bytes:',len(blob))
+          print('SHA-256:',hashlib.sha256(blob).hexdigest())
+          PY
+          echo "$SOURCE_SHA256  $SOURCE_ARCHIVE" | sha256sum -c -
+          tar -xJf "$SOURCE_ARCHIVE" -C .ci/extracted
+          test -f "$PROJECT/ProjectSettings/ProjectVersion.txt"
+          test -f "$PROJECT/Packages/manifest.json"
+          test -f "$PROJECT/Assets/AnimalRandomDefense/Scripts/Editor/Build/AndroidDevelopmentBuilder.cs"
+          grep -q '6000.3.6f1' "$PROJECT/ProjectSettings/ProjectVersion.txt"
+
+      - name: Preflight Unity credentials
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        run: |
+          set -euo pipefail
+          test -n "${UNITY_EMAIL:-}" || { echo '::error::Missing UNITY_EMAIL'; exit 4; }
+          test -n "${UNITY_PASSWORD:-}" || { echo '::error::Missing UNITY_PASSWORD'; exit 4; }
+          if [ -z "${UNITY_LICENSE:-}" ] && [ -z "${UNITY_SERIAL:-}" ]; then
+            echo '::error::Missing UNITY_LICENSE or UNITY_SERIAL'; exit 5
+          fi
+          echo 'Unity credential preflight passed.'
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: .ci/extracted/AnimalRandomDefense_MVP/Library
+          key: ard-v26-android-${{ env.SOURCE_SHA256 }}
+          restore-keys: |
+            ard-v26-android-
+
+      - name: Build APK with Unity
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          projectPath: .ci/extracted/AnimalRandomDefense_MVP
+          unityVersion: 6000.3.6f1
+          targetPlatform: Android
+          androidExportType: androidPackage
+          buildMethod: AnimalRandomDefense.EditorBuild.AndroidDevelopmentBuilder.Build
+
+      - name: Collect and verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find . -type f -name "$APK_NAME" -print -quit)"
+          test -n "$APK"
+          mkdir -p apk-output
+          cp "$APK" "apk-output/$APK_NAME"
+          test "$(head -c 2 "apk-output/$APK_NAME")" = 'PK'
+          unzip -t "apk-output/$APK_NAME" >/dev/null
+          sha256sum "apk-output/$APK_NAME" | tee "apk-output/$APK_NAME.sha256"
+          ls -lh apk-output
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZodiacRandomDefense-v26-cloud-dev-apk
+          path: apk-output/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish prerelease download
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete dev-apk-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag -y 2>/dev/null || true
+          git tag -d dev-apk-latest 2>/dev/null || true
+          git push origin :refs/tags/dev-apk-latest 2>/dev/null || true
+          gh release create dev-apk-latest \
+            "apk-output/$APK_NAME" \
+            "apk-output/$APK_NAME.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title 'Animal Defense v26 Development APK' \
+            --notes 'Development APK for Android real-device play testing. ARM64 / IL2CPP / Unity 6000.3.6f1.' \
+            --prerelease
