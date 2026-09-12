@@ -1,56 +1,58 @@
-# Zodiac Random Defense — Cloud APK Build
+# Zodiac Random Defense — Android Cloud Build
 
-`Animaldefense` is configured to build the Android Development APK in GitHub Actions with GameCI.
+This private repository is prepared to build the Android Development APK for **십이지 랜덤 디펜스 / Zodiac Random Defense** using GitHub Actions + GameCI.
 
-## 1. Upload one project archive
+## Source
 
-Upload this file to the repository root **without renaming it**:
+The Unity v26.2 project is embedded as four Base64 chunks under:
 
-`AnimalRandomDefense_v26_2_CLOUD_APK_BUILD.zip`
+`.ci/source_chunks/`
 
-The file is provided in the ChatGPT conversation.
+The workflow reconstructs and verifies the source automatically. No project ZIP upload is required.
 
-## 2. Configure Unity license secrets
+Source archive SHA-256:
 
-Go to:
+`767ca4faa9cd0005c247fbaeb5a18e73e4b679f123133c2003b4ef79141fc303`
 
-`Settings → Secrets and variables → Actions → New repository secret`
+## Build configuration
 
-For Unity Personal, GameCI's current guidance is to activate a Personal license in Unity Hub and copy the contents of the generated `.ulf` license file. Add:
-
-- `UNITY_LICENSE` — full contents of `Unity_lic.ulf`
-- `UNITY_EMAIL` — Unity account email
-- `UNITY_PASSWORD` — Unity account password
-
-For Unity Pro, use `UNITY_SERIAL`, `UNITY_EMAIL`, `UNITY_PASSWORD` instead.
-
-## 3. Run the APK build
-
-Go to:
-
-`Actions → Build Android Development APK → Run workflow → Run workflow`
-
-The workflow extracts the uploaded Unity project and builds with:
-
-- Unity `6000.3.6f1`
-- Android
+- Unity: `6000.3.6f1`
+- Android Development APK
 - ARM64
 - IL2CPP
-- Development Build
 - Portrait
+- Development Mock Rewarded adapter enabled for testing
 
-## 4. Download the APK
+## Required GitHub Actions secrets
 
-After the workflow succeeds, open the workflow run and download the artifact:
+Configure only in `Settings → Secrets and variables → Actions`.
+
+Unity Personal:
+- `UNITY_LICENSE`
+- `UNITY_EMAIL`
+- `UNITY_PASSWORD`
+
+Unity Pro:
+- `UNITY_SERIAL`
+- `UNITY_EMAIL`
+- `UNITY_PASSWORD`
+
+Do not commit credentials to the repository.
+
+## Build output
+
+Workflow:
+
+`Actions → Build Android Development APK`
+
+Expected artifact:
 
 `ZodiacRandomDefense-v26-cloud-dev-apk`
 
-Inside it:
+Expected APK:
 
 `ZodiacRandomDefense-v26-cloud-dev.apk`
 
-Install that APK on the Android device for testing.
+## Current runner status
 
-## Notes
-
-The cloud build uses the development Mock Rewarded adapter so the game can be tested before final LevelPlay production integration.
+A minimal `ubuntu-latest` smoke workflow failed before a GitHub-hosted runner was assigned. See `CLOUD_APK_NEXT_STEPS.md` for the repository Actions/billing checks required before the APK workflow can run.
