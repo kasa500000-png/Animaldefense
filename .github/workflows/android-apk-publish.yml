@@ -85,6 +85,10 @@ jobs:
           if [ -z "${UNITY_LICENSE:-}" ] && [ -z "${UNITY_SERIAL:-}" ]; then
             echo '::error::Missing UNITY_LICENSE or UNITY_SERIAL'; exit 5
           fi
+          if [[ ! "$UNITY_PASSWORD" =~ ^[[:alnum:]]+$ ]]; then
+            echo '::error::UNITY_PASSWORD contains special characters. The previous Unity activation returned HTTP 401, and GameCI documents activation issues with special-character passwords. Set an alphanumeric Unity ID password and update the secret.'
+            exit 6
+          fi
           echo 'Unity credential preflight passed.'
 
       - name: Free disk space
@@ -106,6 +110,7 @@ jobs:
             ard-v26-android-
 
       - name: Build APK with Unity
+        id: unity_build
         uses: game-ci/unity-builder@v4
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -117,10 +122,21 @@ jobs:
           unityVersion: 6000.3.6f1
           targetPlatform: Android
           androidExportType: androidPackage
+          androidTargetSdkVersion: AndroidApiLevel35
           buildMethod: AnimalRandomDefense.EditorBuild.AndroidDevelopmentBuilder.Build
           versioning: Custom
           version: 0.26.2
           allowDirtyBuild: true
+          collectUnityLogs: true
+
+      - name: Upload Unity diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-build-diagnostics
+          path: Logs/UnityDiagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Collect and verify APK
         shell: bash
