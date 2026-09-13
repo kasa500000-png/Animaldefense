@@ -86,8 +86,7 @@ jobs:
             echo '::error::Missing UNITY_LICENSE or UNITY_SERIAL'; exit 5
           fi
           if [[ ! "$UNITY_PASSWORD" =~ ^[[:alnum:]]+$ ]]; then
-            echo '::error::UNITY_PASSWORD contains special characters. The previous Unity activation returned HTTP 401, and GameCI documents activation issues with special-character passwords. Set an alphanumeric Unity ID password and update the secret.'
-            exit 6
+            echo '::warning::UNITY_PASSWORD contains special characters. Unity currently requires at least one special character for new passwords; continuing with the secret unchanged.'
           fi
           echo 'Unity credential preflight passed.'
 
