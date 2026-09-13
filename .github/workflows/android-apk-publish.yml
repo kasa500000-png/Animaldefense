@@ -118,6 +118,9 @@ jobs:
           targetPlatform: Android
           androidExportType: androidPackage
           buildMethod: AnimalRandomDefense.EditorBuild.AndroidDevelopmentBuilder.Build
+          versioning: Custom
+          version: 0.26.2
+          allowDirtyBuild: true
 
       - name: Collect and verify APK
         shell: bash
