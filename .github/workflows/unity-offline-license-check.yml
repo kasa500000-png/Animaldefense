@@ -1,0 +1,35 @@
+name: Unity Offline ULF Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/apk-source-repack
+    paths:
+      - '.github/workflows/unity-offline-license-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check-offline-ulf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check ULF directly without Unity account login
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        run: |
+          set -euo pipefail
+          test -n "${UNITY_LICENSE:-}" || { echo '::error::UNITY_LICENSE is missing'; exit 2; }
+          HOME_DIR="$PWD/.ci/offline-unity-home"
+          LICENSE_DIR="$HOME_DIR/.local/share/unity3d/Unity"
+          mkdir -p "$LICENSE_DIR" "$HOME_DIR/.cache/unity3d" "$HOME_DIR/.config/unity3d"
+          printf '%s' "$UNITY_LICENSE" | tr -d '\r' > "$LICENSE_DIR/Unity_lic.ulf"
+          test -s "$LICENSE_DIR/Unity_lic.ulf"
+          docker run --rm \
+            -e HOME=/root \
+            -v "$HOME_DIR:/root" \
+            unityci/editor:ubuntu-6000.3.6f1-android-3 \
+            /opt/unity/Editor/Unity -batchmode -nographics -quit -logFile /dev/stdout
