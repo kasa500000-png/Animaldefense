@@ -1,0 +1,1 @@
+Unity Build Automation project stub. The complete Assets folder is reconstructed by BuildTools/uba-prebuild.sh before the Unity build starts.
